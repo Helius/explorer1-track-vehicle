@@ -5,24 +5,24 @@
 #include "uart.h"
 
 #ifndef UART_BAUDRATE
-#pragma error "uart UART_BAUDRATE was not set!!"
+#pragma error " uart UART_BAUDRATE was not set!!"
 #else
 #define XSTR(x) STR(x)
 #define STR(x) #x
-#pragma message("Use uart baudrate "XSTR(UART_BAUDRATE))
+#pragma message( "Use uart baudrate " XSTR(UART_BAUDRATE))
 #endif
 
 
 #if defined UART_DOUBLE_SPEED
 #define UART_DIVIDER 8UL
-#pragma message("Use uart double speed mode ")
+#pragma message( " Use uart double speed mode ")
 #else
 #define UART_DIVIDER 16UL
 #endif
 
 #define BAUD_PRESCALLER (((F_CPU / (UART_BAUDRATE * UART_DIVIDER))) - 1)
 
-int uart_putchar(char c, FILE *stream) {
+int uart_putchar(char c, FILE *) {
 #if defined __AVR_ATmega328P__ || defined __AVR_ATmega168__
 	while(!(UCSR0A & (1<<UDRE0)));
 	UDR0 = c;
@@ -60,16 +60,21 @@ ISR(USART_RX_vect)
 		(*receiver_handler)(UDR0);
 	}
 }
-
+/*
 FILE uart_output = FDEV_SETUP_STREAM(uart_putchar, NULL, _FDEV_SETUP_WRITE);
 FILE uart_input = FDEV_SETUP_STREAM(NULL, uart_getchar, _FDEV_SETUP_READ);
 FILE uart_io = FDEV_SETUP_STREAM(uart_putchar, uart_getchar, _FDEV_SETUP_RW);
-
-void uart_init(void) {
+*/
+void uart_init(int withInterrupt) {
 #if defined __AVR_ATmega328P__ || defined __AVR_ATmega168__
 	UBRR0H = (uint8_t)(BAUD_PRESCALLER>>8);
 	UBRR0L = (uint8_t)(BAUD_PRESCALLER);
+	
 	UCSR0B = (1<<RXEN0)|(1<<TXEN0);
+	if(withInterrupt) {
+		UCSR0B |= (1<<RXCIE0);
+	}
+
 	UCSR0C = ((1<<UCSZ00)|(1<<UCSZ01));
 #if defined UART_DOUBLE_SPEED
 	UCSR0A = (1<<U2X0);
@@ -77,7 +82,12 @@ void uart_init(void) {
 #elif defined __AVR_ATmega8__
 	UBRRH = (uint8_t)(BAUD_PRESCALLER>>8);
 	UBRRL = (uint8_t)(BAUD_PRESCALLER);
+
 	UCSRB = (1<<RXEN)|(1<<TXEN);
+	if(withInterrupt) {
+		UCSRB |= (1<<RXCIE);
+	}
+
 	UCSRC = ((1<<URSEL)|(1<<UCSZ0)|(1<<UCSZ1));
 #if defined UART_DOUBLE_SPEED
 	UCSRA = (1<<U2X);
@@ -86,7 +96,7 @@ void uart_init(void) {
 #pragma error "can't find configuration for this MC"
 #endif
 
-	stdout = &uart_output;
-	stdin  = &uart_input;
+//	stdout = fdevopen(uart_putchar, NULL);
+//	stdin  = fdevopen(NULL, uart_getchar);
 }
 

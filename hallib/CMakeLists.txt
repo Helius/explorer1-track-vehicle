@@ -3,6 +3,8 @@ add_definitions("-DUART_DOUBLE_SPEED")
 
 add_avr_library(
    hallib
-   uart.c 
+   uart.cpp
    uart.h
+	 I2C.cpp
+	 I2C.h
 )
