@@ -109,8 +109,7 @@ class Track {
 				pwm.clear();
 				dir1.clear();
 				dir2.clear();
-			} 
-			else if (speed > 0) {
+			} else if (speed > 0) {
 				if(speed_ > Top) {
 					speed_ = Top;
 				}
@@ -212,6 +211,12 @@ int main(void)
 
 		int8_t direction = ibus.channel(0)/10 - 150;
 		int8_t speed = ibus.channel(1)/10 - 150;
+		if(abs(speed) < 3) {
+			speed = 0;
+		}
+		if(abs(direction) < 3) {
+			direction = 0;
+		}
 		shassis.setSpeedAndDirection(speed, direction);
 	
 /*
