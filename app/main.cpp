@@ -21,7 +21,7 @@ public:
 	}
 
 	void handleByte(uint8_t b) {
-			
+		
 		if(index == 0) {
 			if(b != len) {
 				ready_ = false;
@@ -46,17 +46,12 @@ public:
       }
 			index++;
     }
-		if (index == len) {
+		if (index >= len) {
       index = 0;
 			if(verifyCheckSum(checksum, buf[30], buf[31])) {
 				ready_ = true;
 			}
 		}
-	}
-
-	void timeOut() {
-		index = 0;
-		ready_ = false;
 	}
 
 	bool ready() const { return ready_; }
@@ -91,76 +86,68 @@ class Track {
 		
 		Track(volatile uint8_t * ddr,
 				volatile uint8_t * port,
-				uint8_t pEn,
+				volatile uint8_t * value,
 				uint8_t pDir1,
 				uint8_t pDir2) 
 		: port(port)
-		, pwm(OutPin(ddr, port, pEn))
+		, value(value)
 		, dir1(OutPin(ddr, port, pDir1))
 		, dir2(OutPin(ddr, port, pDir2))
+		{}
+
+		void setLimit(uint8_t limit)
 		{
+			max = limit;
 		}
 		
 		void setSpeed(int8_t speed) 
 		{
-			speed_ = speed;
-
-			if(speed_ == 0) {
-				pwm.clear();
+			if(speed == 0) {
 				dir1.clear();
 				dir2.clear();
-			} else if (speed > 0) {
-				if(speed_ > Top) {
-					speed_ = Top;
-				}
-				dir1.clear();
-				dir2.set();
-			} else if (speed < 0) {
-				if(-speed_ > Top) {
-					speed_ = -Top;
-				}
-				dir1.set();
-				dir2.clear();
-			}
-			pwmCount = 0;
-		}
-
-		void tick()
-		{
-			if(speed_ == 0) {
-				return;
-			}
-			
-			if(pwmCount > abs(speed_)) {
-				pwm.clear();
+				*value = 0;
 			} else {
-				pwm.set();
-			}
-			
-			pwmCount++;
-			if(pwmCount > Top) {
-				pwmCount = 0;
+				if (speed > 0) {
+					if(speed > Top) {
+						speed = Top;
+					}
+					dir1.clear();
+					dir2.set();
+				} else if (speed < 0) {
+					if(-speed > Top) {
+						speed = -Top;
+					}
+					dir1.set();
+					dir2.clear();
+				}
+				uint16_t v = (abs(speed)*max)/Top;
+				*value = v;
 			}
 		}
 
 	private:	
 		static constexpr uint8_t Top = 50;
-		int8_t speed_ = 0;
-		uint8_t pwmCount = 0;
 		volatile uint8_t * port;
-		OutPin pwm;
+		volatile uint8_t * value;
 		OutPin dir1;
 		OutPin dir2;
+		uint8_t max;
 };
 
 
 class Shassis {
 	public:
 		Shassis()
-			: rTrack(Track(&DDRC, &PORTC, PC0, PC1, PC2))
-			, lTrack(Track(&DDRC, &PORTC, PC5, PC3, PC4))
-	{}
-		void setSpeedAndDirection(int8_t speed, int8_t direction) {
+			: rTrack(Track(&DDRC, &PORTC, &OCR0A, PC1, PC2))
+			, lTrack(Track(&DDRC, &PORTC, &OCR0B, PC3, PC4))
+	{
+		rTrack.setLimit(254);
+		lTrack.setLimit(254);
+	}
+		void setSpeedAndDirection(int8_t speed, int8_t direction, int8_t limit) {
+			lTrack.setLimit(limit);	
+			rTrack.setLimit(limit);	
+
 			lTrack.setSpeed(speed + direction);
 			rTrack.setSpeed(speed - direction);
 			
@@ -169,11 +156,6 @@ class Shassis {
 			printNumb(speed + direction);
 			uart_putchar('\n');
 			uart_putchar('\r');
-		}
-
-		void tick() {
-			rTrack.tick();
-			lTrack.tick();
 		}
 
 	private:
@@ -187,37 +169,54 @@ void uart_rx_handler(unsigned char ch)
 {
 	ibus.handleByte(ch);
 }
-
-ISR(TIMER0_COMPA_vect)
+/*
+ISR(TIMER0_OVF_vect)
 {
-	shassis.tick();
-}
+	ibus.tick_ms(1);
+}*/
 
 int main(void)
 {
-	// setup timer (16MHz/80 = 200KHz)
-	TCCR0A = _BV(WGM01); // ctc mode
-	TCCR0B = _BV(CS01);  // prescaller is 1
-	TIMSK0 = _BV(OCIE0A);// top is OCR0A
-	OCR0A  = 250; 
+	TCCR0A = _BV(WGM01) | _BV(WGM00) | _BV(COM0A1) | _BV(COM0B1); // fast pwm, non-invert
+	TCCR0B = _BV(CS01) | _BV(CS00);  // prescaller is 32
+	OCR0A  = 0; 
+	OCR0B  = 0; 
+	DDRD = _BV(PD5) | _BV(PD6);
+	//TIMSK0 = _BV(TOIE0);
 
 	set_receive_interrupt_handler(uart_rx_handler);
 	uart_init(1);
 
 	sei();
+	
+	while(!ibus.ready()) {
+		_delay_ms(30);
+		led.toggle();
+	}
+	
 	while(1)
 	{
 		_delay_ms(100);
 
-		int8_t direction = ibus.channel(0)/10 - 150;
-		int8_t speed = ibus.channel(1)/10 - 150;
+		uint8_t max = (ibus.channel(4)/10); // 100..200
+		if(max < 100) max = 100;
+		if(max > 200) max = 200;
+		uint8_t limit = max + 55;
+
+
+		int8_t speed = ibus.channel(1)/10 - 150;       // -50..50
+		int8_t direction = (ibus.channel(0)/10 - 150); // -50..50
+		
+		
 		if(abs(speed) < 3) {
 			speed = 0;
 		}
 		if(abs(direction) < 3) {
 			direction = 0;
 		}
-		shassis.setSpeedAndDirection(speed, direction);
+		
+
+		shassis.setSpeedAndDirection(speed, direction, limit);
 	
 /*
 		for(int i = 0; i < 15; ++i)
